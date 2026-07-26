@@ -45,14 +45,15 @@ terminal scrollback.
    variable:
 
    ```bash
-   # exec runs the command directly (no shell). Use sh -c when you need shell
-   # variable expansion.
-   guhio exec --with github:GITHUB_TOKEN -- sh -c \
-     'curl -H "Authorization: token $GITHUB_TOKEN" https://api.github.com/user'
+   # exec runs the command directly (no shell). Use --expand to substitute
+   # $VAR placeholders in the command arguments, or sh -c for full shell usage.
+   guhio exec --with github:GITHUB_TOKEN --expand -- curl \
+     -H "Authorization: token $GITHUB_TOKEN" https://api.github.com/user
    ```
 
    The value of `GITHUB_TOKEN` is supplied by Guhio and injected into the
-   subprocess environment; it does not appear in the command you type.
+   subprocess environment; with `--expand` it is also substituted into argument
+   placeholders. It does not appear in the command you type.
 
 3. If the credential does not exist, tell the human:
 

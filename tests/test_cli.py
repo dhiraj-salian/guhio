@@ -202,6 +202,34 @@ def test_exec_does_not_leak_master_password_to_child(tmp_path):
     assert "SEEN: none" in exec_result.stdout
 
 
+def test_exec_expands_env_placeholders(tmp_path):
+    vault_path = tmp_path / "vault.json"
+    run_cli(["--vault", str(vault_path), "init"], input_text="master\nmaster\n")
+    run_cli(
+        ["--vault", str(vault_path), "--password", "master", "add", "github", "--value", "secret"]
+    )
+
+    exec_result = run_cli(
+        [
+            "--vault",
+            str(vault_path),
+            "exec",
+            "--password",
+            "master",
+            "--expand",
+            "--with",
+            "github:GITHUB_TOKEN",
+            "--",
+            sys.executable,
+            "-c",
+            "import sys; print(sys.argv[1])",
+            "value=$GITHUB_TOKEN",
+        ]
+    )
+    assert exec_result.returncode == 0
+    assert exec_result.stdout.strip() == "value=secret"
+
+
 def test_parser_rejects_unknown_command():
     parser = build_parser()
     with pytest.raises(SystemExit):

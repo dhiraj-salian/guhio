@@ -65,7 +65,12 @@ guhio lock
 
 # Use a credential without revealing it — the value is injected as an env var.
 # exec runs the command directly (no shell), so shell variables like $GITHUB_TOKEN
-# are not expanded. Use a shell wrapper when you need expansion:
+# are not expanded. Use --expand to expand $VAR placeholders in arguments, or
+# wrap the command in sh -c when you need full shell features:
+guhio exec --with github:GITHUB_TOKEN --expand -- curl \
+  -H "Authorization: token $GITHUB_TOKEN" https://api.github.com/user
+
+# Equivalent using a shell wrapper:
 guhio exec --with github:GITHUB_TOKEN -- sh -c \
   'curl -H "Authorization: token $GITHUB_TOKEN" https://api.github.com/user'
 

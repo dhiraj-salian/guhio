@@ -3,6 +3,7 @@
 import argparse
 import getpass
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -180,6 +181,19 @@ def _parse_mapping(mapping: str) -> tuple[str, str]:
     return name, env_var
 
 
+_ENV_VAR_RE = re.compile(r"\$\{(\w+)\}|\$(\w+)")
+
+
+def _expand_vars(text: str, env: dict[str, str]) -> str:
+    """Expand $VAR and ${VAR} placeholders using the provided environment."""
+
+    def _repl(match: re.Match[str]) -> str:
+        var = match.group(1) or match.group(2)
+        return env.get(var, match.group(0))
+
+    return _ENV_VAR_RE.sub(_repl, text)
+
+
 def cmd_dashboard(args) -> None:
     """Start the local web dashboard."""
     from guhio.dashboard import run_dashboard
@@ -218,6 +232,9 @@ def cmd_exec(args) -> None:
     if not command:
         print("No command provided.", file=sys.stderr)
         sys.exit(1)
+
+    if getattr(args, "expand", False):
+        command = [_expand_vars(arg, env) for arg in command]
 
     # Run the command directly; do not invoke a shell so the value stays out of
     # the command string visible to the agent.
@@ -317,6 +334,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=[],
         metavar="NAME:ENV_VAR",
         help="Inject credential NAME as environment variable ENV_VAR",
+    )
+    exec_parser.add_argument(
+        "--expand",
+        action="store_true",
+        help="Expand $VAR and ${VAR} placeholders in command arguments using the injected environment",
     )
     exec_parser.add_argument(
         "command",

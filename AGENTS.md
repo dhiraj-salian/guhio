@@ -31,7 +31,7 @@ Git repository: `git@github.com:dhiraj-salian/guhio.git`
 | `.venv/bin/python -m guhio.cli list` | List credential names and creation times. Does not show values. |
 | `.venv/bin/python -m guhio.cli unlock` | Unlock the vault and create an encrypted CLI session. |
 | `.venv/bin/python -m guhio.cli lock` | Clear the CLI session. |
-| `.venv/bin/python -m guhio.cli exec --with github:GITHUB_TOKEN -- sh -c 'curl ... $GITHUB_TOKEN'` | Run a command with the credential injected as an environment variable. |
+| `.venv/bin/python -m guhio.cli exec --with github:GITHUB_TOKEN --expand -- curl ... $GITHUB_TOKEN` | Run a command with credential values expanded into arguments. |
 | `.venv/bin/python -m guhio.cli get github` | Reveal a credential value. Prefer `exec` for agent workflows. |
 | `.venv/bin/python -m guhio.cli remove github` | Delete a credential. |
 | `.venv/bin/python -m guhio.cli dashboard` | Start the local web dashboard on `http://127.0.0.1:5000`. |
@@ -203,8 +203,8 @@ Important implementation details:
 - `guhio exec` treats `--` as a separator. If the first token in `args.command`
   is `"--"`, the CLI strips it before passing the rest to `subprocess.run`.
 - `guhio exec` runs commands directly, not through a shell. Shell variables such
-  as `$GITHUB_TOKEN` in the command string are not expanded by the parent shell;
-  either pass a command that reads the env var itself or wrap the command in
-  `sh -c '...'`.
+  as `$GITHUB_TOKEN` in the command string are not expanded by the parent shell.
+  Pass `--expand` to substitute `$VAR`/`${VAR}` placeholders in arguments, or wrap
+  the command in `sh -c '...'` for full shell features.
 - Dashboard sessions disappear if the server process restarts because they are
   stored in memory. This is by design for local use.
