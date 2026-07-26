@@ -56,9 +56,18 @@ guhio list
 # Reveal a credential value (for humans/scripts; agents should prefer exec)
 guhio get github
 
-# Use a credential without revealing it — the value is injected as an env var
-guhio exec --with github:GITHUB_TOKEN -- curl \
-  -H "Authorization: token $GITHUB_TOKEN" https://api.github.com/user
+# Unlock the vault once to create a session, then run commands without re-prompting
+eval $(guhio unlock)
+guhio exec --with github:GITHUB_TOKEN -- env | grep GITHUB_TOKEN
+
+# Lock the vault and clear the session
+guhio lock
+
+# Use a credential without revealing it — the value is injected as an env var.
+# exec runs the command directly (no shell), so shell variables like $GITHUB_TOKEN
+# are not expanded. Use a shell wrapper when you need expansion:
+guhio exec --with github:GITHUB_TOKEN -- sh -c \
+  'curl -H "Authorization: token $GITHUB_TOKEN" https://api.github.com/user'
 
 # Remove a credential
 guhio remove github
@@ -69,8 +78,10 @@ or the `GUHIO_VAULT` environment variable.
 
 For automation and tests, the master password can be supplied via the
 `GUHIO_MASTER_PASSWORD` environment variable or the hidden `--password` flag.
-For normal interactive use, omit both and enter the password at the secure
-prompt.
+`guhio unlock` creates an encrypted session token in `~/.guhio/session.json` and
+prints `export GUHIO_SESSION=...`; subsequent commands use that token instead of
+prompting. Run `guhio lock` to clear the session. For normal interactive use,
+omit both and enter the password at the secure prompt.
 
 ## Dashboard
 

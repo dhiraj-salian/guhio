@@ -87,6 +87,121 @@ def test_exec_injects_env_var(tmp_path):
     assert exec_result.stdout.strip() == "secret-token"
 
 
+def test_exec_uses_unlock_session(tmp_path):
+    vault_path = tmp_path / "vault.json"
+    env = {**os.environ, "GUHIO_MASTER_PASSWORD": "master"}
+    init = run_cli(["--vault", str(vault_path), "init"], input_text="master\nmaster\n")
+    assert init.returncode == 0
+
+    add = run_cli(
+        ["--vault", str(vault_path), "--password", "master", "add", "github", "--value", "secret"]
+    )
+    assert add.returncode == 0
+
+    unlock = run_cli(["--vault", str(vault_path), "unlock"], env=env)
+    assert unlock.returncode == 0
+    token_line = unlock.stdout.strip().splitlines()[0]
+    assert token_line.startswith("export GUHIO_SESSION=")
+    session_token = token_line.split("=", 1)[1]
+
+    exec_env = {**os.environ, "GUHIO_SESSION": session_token}
+    exec_result = run_cli(
+        [
+            "--vault",
+            str(vault_path),
+            "exec",
+            "--with",
+            "github:GITHUB_TOKEN",
+            "--",
+            sys.executable,
+            "-c",
+            "import os; print(os.environ['GITHUB_TOKEN'])",
+        ],
+        env=exec_env,
+    )
+    assert exec_result.returncode == 0
+    assert exec_result.stdout.strip() == "secret"
+
+
+def test_lock_clears_session(tmp_path):
+    vault_path = tmp_path / "vault.json"
+    env = {**os.environ, "GUHIO_MASTER_PASSWORD": "master"}
+    run_cli(["--vault", str(vault_path), "init"], input_text="master\nmaster\n")
+    run_cli(["--vault", str(vault_path), "unlock"], env=env)
+
+    lock = run_cli(["--vault", str(vault_path), "lock"])
+    assert lock.returncode == 0
+
+    # After locking, exec with no password source should fail rather than run.
+    exec_result = run_cli(
+        ["--vault", str(vault_path), "exec", "--with", "github:GITHUB_TOKEN", "--", "echo", "x"]
+    )
+    assert exec_result.returncode != 0
+
+
+def test_exec_password_flag_after_subcommand(tmp_path):
+    vault_path = tmp_path / "vault.json"
+    run_cli(["--vault", str(vault_path), "init"], input_text="master\nmaster\n")
+    run_cli(
+        ["--vault", str(vault_path), "--password", "master", "add", "github", "--value", "secret"]
+    )
+
+    exec_result = run_cli(
+        [
+            "--vault",
+            str(vault_path),
+            "exec",
+            "--password",
+            "master",
+            "--with",
+            "github:GITHUB_TOKEN",
+            "--",
+            sys.executable,
+            "-c",
+            "import os; print(os.environ['GITHUB_TOKEN'])",
+        ]
+    )
+    assert exec_result.returncode == 0
+    assert exec_result.stdout.strip() == "secret"
+
+
+def test_exec_does_not_leak_master_password_to_child(tmp_path):
+    vault_path = tmp_path / "vault.json"
+    env = {**os.environ, "GUHIO_MASTER_PASSWORD": "master"}
+    run_cli(["--vault", str(vault_path), "init"], input_text="master\nmaster\n")
+
+    unlock = run_cli(["--vault", str(vault_path), "unlock"], env=env)
+    assert unlock.returncode == 0
+    token_line = unlock.stdout.strip().splitlines()[0]
+    session_token = token_line.split("=", 1)[1]
+
+    session_env = {k: v for k, v in os.environ.items() if k != "GUHIO_MASTER_PASSWORD"}
+    session_env["GUHIO_SESSION"] = session_token
+
+    add = run_cli(
+        ["--vault", str(vault_path), "add", "github", "--value", "secret"],
+        env=session_env,
+    )
+    assert add.returncode == 0
+
+    exec_result = run_cli(
+        [
+            "--vault",
+            str(vault_path),
+            "exec",
+            "--with",
+            "github:GITHUB_TOKEN",
+            "--",
+            sys.executable,
+            "-c",
+            "import os; print('SEEN:', os.environ.get('GUHIO_MASTER_PASSWORD', 'none'))",
+        ],
+        env=session_env,
+    )
+    assert exec_result.returncode == 0
+    assert "SEEN: none" in exec_result.stdout
+
+
 def test_parser_rejects_unknown_command():
     parser = build_parser()
     with pytest.raises(SystemExit):

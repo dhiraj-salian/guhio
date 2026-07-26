@@ -7,6 +7,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+from guhio import session as session_store
 from guhio.store import (
     EntryNotFoundError,
     InvalidPasswordError,
@@ -39,8 +40,14 @@ def _read_env_password() -> str | None:
     return os.environ.get("GUHIO_MASTER_PASSWORD")
 
 
-def _get_password_for_unlock(args) -> str:
+def _get_password_for_unlock(args, vault: Vault) -> str:
     """Determine the master password for unlocking an existing vault."""
+    session_token = os.environ.get("GUHIO_SESSION")
+    if session_token:
+        password = session_store.load_session_password(vault.path, session_token)
+        if password is not None:
+            return password
+
     env_password = _read_env_password()
     if env_password is not None:
         return env_password
@@ -61,21 +68,31 @@ def cmd_init(args) -> None:
 
 
 def cmd_unlock(args) -> None:
-    """Unlock the vault and keep it unlocked in memory (no-op for CLI)."""
+    """Unlock the vault and create a session token for subsequent commands."""
     vault = Vault(args.vault)
-    password = _get_password_for_unlock(args)
+    password = _get_password_for_unlock(args, vault)
     try:
         vault.unlock(password)
     except InvalidPasswordError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         sys.exit(1)
-    print("Vault unlocked.")
+
+    token = session_store.save_session(vault.path, password)
+    print(f"export GUHIO_SESSION={token}")
+    print("Vault unlocked.", file=sys.stderr)
+
+
+def cmd_lock(args) -> None:
+    """Lock the vault by clearing any active CLI session."""
+    vault = Vault(args.vault)
+    session_store.clear_session(vault.path)
+    print("Vault locked.")
 
 
 def cmd_add(args) -> None:
     """Add a new credential to the vault."""
     vault = Vault(args.vault)
-    password = _get_password_for_unlock(args)
+    password = _get_password_for_unlock(args, vault)
     try:
         vault.unlock(password)
     except InvalidPasswordError as exc:
@@ -101,7 +118,7 @@ def cmd_add(args) -> None:
 def cmd_list(args) -> None:
     """List stored credential names."""
     vault = Vault(args.vault)
-    password = _get_password_for_unlock(args)
+    password = _get_password_for_unlock(args, vault)
     try:
         vault.unlock(password)
     except InvalidPasswordError as exc:
@@ -119,7 +136,7 @@ def cmd_list(args) -> None:
 def cmd_remove(args) -> None:
     """Remove a credential from the vault."""
     vault = Vault(args.vault)
-    password = _get_password_for_unlock(args)
+    password = _get_password_for_unlock(args, vault)
     try:
         vault.unlock(password)
     except InvalidPasswordError as exc:
@@ -141,7 +158,7 @@ def cmd_get(args) -> None:
     ``exec`` to avoid exposing values in their context.
     """
     vault = Vault(args.vault)
-    password = _get_password_for_unlock(args)
+    password = _get_password_for_unlock(args, vault)
     try:
         vault.unlock(password)
     except InvalidPasswordError as exc:
@@ -175,7 +192,7 @@ def cmd_dashboard(args) -> None:
 def cmd_exec(args) -> None:
     """Run a command with credentials injected as environment variables."""
     vault = Vault(args.vault)
-    password = _get_password_for_unlock(args)
+    password = _get_password_for_unlock(args, vault)
     try:
         vault.unlock(password)
     except InvalidPasswordError as exc:
@@ -190,6 +207,10 @@ def cmd_exec(args) -> None:
         except EntryNotFoundError as exc:
             print(f"Error: {exc}", file=sys.stderr)
             sys.exit(1)
+
+    # Do not leak the master password or session token to the child process.
+    env.pop("GUHIO_MASTER_PASSWORD", None)
+    env.pop("GUHIO_SESSION", None)
 
     command = args.command
     if command and command[0] == "--":
@@ -210,6 +231,13 @@ def cmd_exec(args) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     """Build the argument parser."""
+    password_parent = argparse.ArgumentParser(add_help=False)
+    password_parent.add_argument(
+        "--password",
+        default=argparse.SUPPRESS,
+        help=argparse.SUPPRESS,
+    )
+
     parser = argparse.ArgumentParser(
         prog="guhio",
         description="Local password vault for agent workflows (guhio: Sanskrit for secret).",
@@ -231,10 +259,21 @@ def build_parser() -> argparse.ArgumentParser:
     init_parser = subparsers.add_parser("init", help="Create a new vault")
     init_parser.set_defaults(func=cmd_init)
 
-    unlock_parser = subparsers.add_parser("unlock", help="Unlock the vault")
+    unlock_parser = subparsers.add_parser(
+        "unlock",
+        parents=[password_parent],
+        help="Unlock the vault and create a session for subsequent commands",
+    )
     unlock_parser.set_defaults(func=cmd_unlock)
 
-    add_parser = subparsers.add_parser("add", help="Add a credential")
+    lock_parser = subparsers.add_parser("lock", help="Lock the vault and clear the session")
+    lock_parser.set_defaults(func=cmd_lock)
+
+    add_parser = subparsers.add_parser(
+        "add",
+        parents=[password_parent],
+        help="Add a credential",
+    )
     add_parser.add_argument("name", help="Name of the credential")
     add_parser.add_argument(
         "--value",
@@ -243,19 +282,32 @@ def build_parser() -> argparse.ArgumentParser:
     )
     add_parser.set_defaults(func=cmd_add)
 
-    list_parser = subparsers.add_parser("list", help="List stored credentials")
+    list_parser = subparsers.add_parser(
+        "list",
+        parents=[password_parent],
+        help="List stored credentials",
+    )
     list_parser.set_defaults(func=cmd_list)
 
-    remove_parser = subparsers.add_parser("remove", help="Remove a credential")
+    remove_parser = subparsers.add_parser(
+        "remove",
+        parents=[password_parent],
+        help="Remove a credential",
+    )
     remove_parser.add_argument("name", help="Name of the credential")
     remove_parser.set_defaults(func=cmd_remove)
 
-    get_parser = subparsers.add_parser("get", help="Print a credential value")
+    get_parser = subparsers.add_parser(
+        "get",
+        parents=[password_parent],
+        help="Print a credential value",
+    )
     get_parser.add_argument("name", help="Name of the credential")
     get_parser.set_defaults(func=cmd_get)
 
     exec_parser = subparsers.add_parser(
         "exec",
+        parents=[password_parent],
         help="Run a command with credentials injected as environment variables",
     )
     exec_parser.add_argument(

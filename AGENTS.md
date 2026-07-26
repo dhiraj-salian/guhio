@@ -29,7 +29,9 @@ Git repository: `git@github.com:dhiraj-salian/guhio.git`
 | `.venv/bin/python -m guhio.cli init` | Create a new vault. Prompts for a master password securely (no echo). |
 | `.venv/bin/python -m guhio.cli add github` | Add a credential. Value is prompted securely unless `--value` is passed. |
 | `.venv/bin/python -m guhio.cli list` | List credential names and creation times. Does not show values. |
-| `.venv/bin/python -m guhio.cli exec --with github:GITHUB_TOKEN -- curl ...` | Run a command with the credential injected as an environment variable. |
+| `.venv/bin/python -m guhio.cli unlock` | Unlock the vault and create an encrypted CLI session. |
+| `.venv/bin/python -m guhio.cli lock` | Clear the CLI session. |
+| `.venv/bin/python -m guhio.cli exec --with github:GITHUB_TOKEN -- sh -c 'curl ... $GITHUB_TOKEN'` | Run a command with the credential injected as an environment variable. |
 | `.venv/bin/python -m guhio.cli get github` | Reveal a credential value. Prefer `exec` for agent workflows. |
 | `.venv/bin/python -m guhio.cli remove github` | Delete a credential. |
 | `.venv/bin/python -m guhio.cli dashboard` | Start the local web dashboard on `http://127.0.0.1:5000`. |
@@ -44,6 +46,7 @@ pyproject.toml          # Build metadata, dependencies, pytest config
 src/guhio/
   __init__.py           # Package metadata
   crypto.py             # Encryption primitives (PBKDF2 + Fernet)
+  session.py            # Encrypted CLI session persistence
   store.py              # Vault class: encrypted JSON file store
   cli.py                # argparse CLI
   dashboard.py          # Flask web dashboard
@@ -154,10 +157,14 @@ Important implementation details:
 ## CLI Secrets Handling
 
 - `--password <pw>` is a hidden flag (argparse.SUPPRESS). It exists for tests
-  and non-interactive scripts, not for routine human use.
+  and non-interactive scripts, not for routine human use. It can now appear before
+  or after the subcommand.
 - `GUHIO_MASTER_PASSWORD` can also supply the master password. It is primarily
   intended for tests and automation.
 - `GUHIO_VAULT` can supply the vault file path when `--vault` is omitted.
+- `guhio unlock` writes an encrypted session to `~/.guhio/session.json` and prints
+  `export GUHIO_SESSION=...`. Subsequent commands read `GUHIO_SESSION` to avoid
+  prompting. Use `guhio lock` to clear it.
 - For normal human use, omit all secret flags and let the CLI prompt via `getpass`.
 
 ## Code Conventions
@@ -175,7 +182,8 @@ Important implementation details:
 2. Register it in `build_parser()` via `subparsers.add_parser(...)` and
    `set_defaults(func=cmd_<name>)`.
 3. If the command needs the vault unlocked, reuse `_get_password_for_unlock`
-   and call `vault.unlock(password)`.
+   and call `vault.unlock(password)`. Note that `_get_password_for_unlock` now
+   takes the `Vault` instance so it can use an active session.
 4. Add a subprocess CLI test in `tests/test_cli.py`.
 
 ## Adding Dashboard Endpoints
@@ -194,5 +202,9 @@ Important implementation details:
   second subprocess will block on `getpass`.
 - `guhio exec` treats `--` as a separator. If the first token in `args.command`
   is `"--"`, the CLI strips it before passing the rest to `subprocess.run`.
+- `guhio exec` runs commands directly, not through a shell. Shell variables such
+  as `$GITHUB_TOKEN` in the command string are not expanded by the parent shell;
+  either pass a command that reads the env var itself or wrap the command in
+  `sh -c '...'`.
 - Dashboard sessions disappear if the server process restarts because they are
   stored in memory. This is by design for local use.
