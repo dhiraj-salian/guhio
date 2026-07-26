@@ -2,6 +2,7 @@ import time
 
 import pytest
 
+from guhio import session as session_store
 from guhio.dashboard import _unlock_failures, _vault_sessions, app
 from guhio.store import Vault
 from urllib.parse import quote
@@ -200,3 +201,21 @@ def test_expired_dashboard_session_rejected(client):
 
     assert client.get("/api/status").get_json()["unlocked"] is False
     assert client.get("/api/credentials").status_code == 401
+
+
+def test_auto_unlock_from_cli_session(client, monkeypatch):
+    """Dashboard auto-unlocks when GUHIO_SESSION env var is set from CLI."""
+    vault = Vault()
+    token = session_store.save_session(vault.path, "master-password")
+    monkeypatch.setenv("GUHIO_SESSION", token)
+
+    response = client.get("/api/status")
+    assert response.status_code == 200
+    assert response.get_json()["unlocked"] is True
+
+
+def test_no_auto_unlock_without_cli_session(client, monkeypatch):
+    """Dashboard stays locked when no CLI session token is in the environment."""
+    monkeypatch.delenv("GUHIO_SESSION", raising=False)
+    response = client.get("/api/status")
+    assert response.get_json()["unlocked"] is False

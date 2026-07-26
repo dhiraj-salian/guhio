@@ -1,11 +1,13 @@
 """Local web dashboard for managing the Guhio vault."""
 
 import logging
+import os
 import secrets
 import time
 
 from flask import Flask, abort, jsonify, render_template, request, session
 
+from guhio import session as session_store
 from guhio.store import EntryNotFoundError, Vault, VaultError
 
 app = Flask(__name__)
@@ -129,6 +131,31 @@ def index() -> str:
     return render_template("dashboard.html")
 
 
+def _try_auto_unlock_from_cli() -> None:
+    """Auto-unlock the vault if a CLI session token is in the environment.
+
+    When the user runs ``eval $(guhio unlock)`` before ``guhio dashboard``,
+    the ``GUHIO_SESSION`` env var holds the CLI session token. Use it to
+    pre-unlock the vault so the dashboard starts in the unlocked state
+    instead of asking for the master password again.
+    """
+    cli_token = os.environ.get("GUHIO_SESSION")
+    if not cli_token:
+        return
+    vault = Vault()
+    password = session_store.load_session_password(vault.path, cli_token)
+    if password is None:
+        return
+    try:
+        vault.unlock(password)
+    except VaultError:
+        return
+    token = secrets.token_urlsafe(32)
+    _vault_sessions[token] = {"vault": vault, "created_at": time.monotonic()}
+    session["vault_token"] = token
+    logger.info("vault auto-unlocked from CLI session")
+
+
 @app.route("/api/status")
 def status() -> dict:
     """Return whether the vault is unlocked for this session."""
@@ -136,6 +163,11 @@ def status() -> dict:
     token = session.get("vault_token")
     entry = _vault_sessions.get(token) if token else None
     vault = entry["vault"] if entry else None
+    if vault is None:
+        _try_auto_unlock_from_cli()
+        token = session.get("vault_token")
+        entry = _vault_sessions.get(token) if token else None
+        vault = entry["vault"] if entry else None
     return jsonify({"unlocked": vault is not None and vault.is_unlocked()})
 
 
