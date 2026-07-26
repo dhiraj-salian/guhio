@@ -1,8 +1,9 @@
-# Guhio
+<h1>
+  <img src="assets/logo.svg" width="120" alt="Guhio logo" align="center">
+  guhio
+</h1>
 
 [![PyPI version](https://img.shields.io/pypi/v/guhio.svg)](https://pypi.org/project/guhio/)
-
-<img src="assets/logo.svg" width="120" alt="Guhio logo">
 
 Guhio (Sanskrit: गुह्य, "secret") is a local password vault for agent workflows.
 Humans store credentials outside the agent context, and agents use them by name
