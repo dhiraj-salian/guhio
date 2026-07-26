@@ -92,12 +92,21 @@ def test_lock_clears_session(client):
 
 
 def test_index_has_no_inline_remove_handler(client):
-    """Regression guard: credential removal must not use inline onclick or
-    innerHTML with user-controlled names (stored XSS)."""
+    """Regression guard: no inline scripts, onclick handlers, or innerHTML
+    with user-controlled names (stored XSS / CSP compliance)."""
     response = client.get("/")
     assert response.status_code == 200
     assert b"escapeHtml" not in response.data
+    assert b"onclick=" not in response.data
+    assert b"<script>" not in response.data
     assert b"onclick=\"removeCredential(" not in response.data
+
+
+def test_dashboard_js_served(client):
+    """The external JS file must be served under /static/."""
+    response = client.get("/static/dashboard.js")
+    assert response.status_code == 200
+    assert b"refreshStatus" in response.data
 
 
 def test_special_character_credential_name_round_trip(client):
