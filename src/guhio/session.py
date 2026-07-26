@@ -23,6 +23,10 @@ from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
 DEFAULT_SESSION_FILENAME = "session.json"
 
+# Encrypted sessions older than this are rejected so a long-lived session
+# file cannot be replayed indefinitely. 8 hours covers a typical work day.
+SESSION_TTL_SECONDS = 8 * 3600
+
 
 def _session_path(vault_path: Path) -> Path:
     """Return the path to the session file for a given vault."""
@@ -71,12 +75,25 @@ def save_session(vault_path: Path, password: str) -> str:
     }
     path = _session_path(vault_path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2)
-        f.write("\n")
-    # Restrict the session file to the owner; it contains an encrypted secret
-    # but defence-in-depth still applies.
-    os.chmod(path, 0o600)
+    # Write atomically with mode 0600 from creation so there is never a window
+    # where the file is world-readable. O_NOFOLLOW rejects a pre-existing
+    # symlink at the temp path (symlink attack defence).
+    tmp_path = path.with_suffix(path.suffix + ".tmp")
+    try:
+        fd = os.open(
+            str(tmp_path),
+            os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW,
+            0o600,
+        )
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+            f.write("\n")
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, path)
+    except Exception:
+        tmp_path.unlink(missing_ok=True)
+        raise
     return token
 
 
@@ -92,6 +109,20 @@ def load_session_password(vault_path: Path, token: str) -> str | None:
         return None
 
     if data.get("version") != 1:
+        return None
+    # Reject expired sessions so a stolen session file cannot be replayed
+    # long after it was created.
+    created_at_raw = data.get("created_at")
+    if not created_at_raw:
+        return None
+    try:
+        created_at = datetime.datetime.fromisoformat(created_at_raw)
+    except ValueError:
+        return None
+    if created_at.tzinfo is None:
+        created_at = created_at.replace(tzinfo=datetime.timezone.utc)
+    age = (datetime.datetime.now(tz=datetime.timezone.utc) - created_at).total_seconds()
+    if age > SESSION_TTL_SECONDS or age < -300:
         return None
     stored_vault = Path(data.get("vault", ""))
     if stored_vault.resolve() != vault_path.resolve():

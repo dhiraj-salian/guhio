@@ -34,3 +34,5 @@ htmlcov/
 # User vaults are stored outside the repo by default, but ignore any stray ones
 *.vault.json
 vault.json
+session.json
+audit.log

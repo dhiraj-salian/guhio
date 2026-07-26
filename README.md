@@ -95,13 +95,25 @@ when the server restarts. Do not expose the dashboard to untrusted networks.
 ## Security notes
 
 - The master password is the only protection for the vault file.
-- Vault files are written atomically with mode `0600`.
+- Vault files and the vault directory are written with restrictive permissions
+  (`0600` and `0700` respectively). Writes are atomic and use `O_NOFOLLOW` to
+  reject symlink redirection attacks.
+- CLI sessions expire after 8 hours. Run `guhio lock` to clear a session
+  immediately. Session files are written atomically with mode `0600`.
+- The dashboard protects against CSRF (SameSite cookies + Origin validation),
+  brute-force unlock (rate limiting with lockout), and sets security headers
+  (`X-Content-Type-Options`, `X-Frame-Options`, `Content-Security-Policy`).
+  Dashboard sessions expire after 30 minutes of inactivity.
 - `guhio exec` runs commands directly (not through a shell). Use `--expand` to
   substitute `$VAR` placeholders, or `sh -c '...'` for full shell features.
-- Never commit vault files to version control.
+  Environment variable names are validated to prevent injection of dangerous
+  variables.
+- Security-relevant events (unlock, credential add/remove/reveal) are recorded
+  in an audit log at `~/.guhio/audit.log` (mode `0600`). No secrets are logged.
+- Never commit vault, session, or audit files to version control.
 
-This is an MVP with reasonable cryptography; it has not undergone a formal
-security audit.
+See [SECURITY.md](./SECURITY.md) for the full security model and known
+limitations.
 
 ## Development and contributing
 

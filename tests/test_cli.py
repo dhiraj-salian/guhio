@@ -293,3 +293,72 @@ def test_init_with_piped_input_does_not_warn_about_echo(tmp_path):
     result = run_cli(["--vault", str(vault_path), "init"], input_text="pass\npass\n")
     assert result.returncode == 0
     assert "Warning: Password input may be echoed" not in result.stderr
+
+
+# --- Security hardening tests ---
+
+
+def test_exec_rejects_invalid_env_var_name(tmp_path):
+    vault_path = tmp_path / "vault.json"
+    run_cli(["--vault", str(vault_path), "init"], input_text="master\nmaster\n")
+    run_cli(
+        ["--vault", str(vault_path), "--password", "master", "add", "github", "--value", "secret"]
+    )
+
+    result = run_cli(
+        [
+            "--vault", str(vault_path), "--password", "master",
+            "exec", "--with", "github:INVALID-NAME", "--", "echo", "x",
+        ]
+    )
+    assert result.returncode != 0
+    assert "Invalid environment variable name" in result.stderr
+
+
+def test_exec_accepts_valid_env_var_name(tmp_path):
+    vault_path = tmp_path / "vault.json"
+    run_cli(["--vault", str(vault_path), "init"], input_text="master\nmaster\n")
+    run_cli(
+        ["--vault", str(vault_path), "--password", "master", "add", "github", "--value", "secret"]
+    )
+
+    result = run_cli(
+        [
+            "--vault", str(vault_path), "--password", "master",
+            "exec", "--with", "github:GITHUB_TOKEN", "--",
+            sys.executable, "-c", "import os; print(os.environ['GITHUB_TOKEN'])",
+        ]
+    )
+    assert result.returncode == 0
+    assert result.stdout.strip() == "secret"
+
+
+def test_audit_log_records_events(tmp_path):
+    vault_path = tmp_path / "vault.json"
+    run_cli(["--vault", str(vault_path), "init"], input_text="master\nmaster\n")
+    run_cli(
+        ["--vault", str(vault_path), "--password", "master", "add", "github", "--value", "ghp_secret"]
+    )
+
+    audit_path = vault_path.parent / "audit.log"
+    assert audit_path.exists()
+    log_content = audit_path.read_text()
+    assert "vault_created" in log_content
+    assert "credential_added" in log_content
+    assert "github" in log_content
+    # The credential value and password must never appear in the audit log.
+    assert "ghp_secret" not in log_content
+    assert "master" not in log_content
+
+
+def test_audit_log_has_restrictive_permissions(tmp_path):
+    import os
+    if os.name != "posix":
+        pytest.skip("file permissions are POSIX-only")
+
+    vault_path = tmp_path / "vault.json"
+    run_cli(["--vault", str(vault_path), "init"], input_text="master\nmaster\n")
+    audit_path = vault_path.parent / "audit.log"
+    assert audit_path.exists()
+    mode = audit_path.stat().st_mode & 0o777
+    assert mode == 0o600

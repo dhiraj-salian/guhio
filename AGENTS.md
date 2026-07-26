@@ -46,10 +46,11 @@ pyproject.toml          # Build metadata, dependencies, pytest config
 src/guhio/
   __init__.py           # Package metadata
   crypto.py             # Encryption primitives (PBKDF2 + Fernet)
-  session.py            # Encrypted CLI session persistence
+  session.py            # Encrypted CLI session persistence (8h TTL)
   store.py              # Vault class: encrypted JSON file store
+  audit.py              # Security audit logging (no secrets logged)
   cli.py                # argparse CLI
-  dashboard.py          # Flask web dashboard
+  dashboard.py          # Flask web dashboard (CSRF, rate-limited, security headers)
   templates/
     dashboard.html      # Dashboard UI
 .claude/skills/guhio/   # Agent skill following agentskills.io spec
@@ -141,18 +142,22 @@ Important implementation details:
 
 ## Security Model and Gotchas
 
-- This is an MVP. It uses reasonable cryptography (PBKDF2-HMAC-SHA256 at
-  600,000 iterations + Fernet/AES-128-CBC + HMAC) but has not undergone a
-  security audit.
+- The vault uses PBKDF2-HMAC-SHA256 (600,000 iterations) + Fernet/AES-128-CBC
+  + HMAC for authenticated encryption. See [SECURITY.md](./SECURITY.md) for
+  the full security model, measures, and known limitations.
 - The master password is the only protection for the vault file. If an attacker
   obtains both the vault file and the master password, all values are exposed.
 - While the vault is unlocked, plaintext values reside in the process memory of
   the `guhio` command or the dashboard process. They are not written to disk
   except in encrypted form.
 - `guhio get <name>` intentionally reveals a value. Agents should avoid it.
-- The verification token exists so that wrong master passwords are detected even
-  when the vault contains no entries. Older vault files without a `verify` field
-  will fail to unlock; recreate them if necessary during this early stage.
+  The event is recorded in the audit log.
+- CLI sessions expire after 8 hours. Dashboard sessions expire after 30 minutes
+  of inactivity. The dashboard rate-limits unlock attempts and validates Origin
+  headers to prevent CSRF.
+- Vault, session, and audit files are written with `0600` permissions inside a
+  `0700` directory. Writes are atomic and use `O_NOFOLLOW` to prevent symlink
+  attacks.
 
 ## CLI Secrets Handling
 

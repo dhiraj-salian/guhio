@@ -10,6 +10,7 @@ import warnings
 from pathlib import Path
 
 from guhio import __version__
+from guhio import audit
 from guhio import session as session_store
 from guhio.store import (
     EntryNotFoundError,
@@ -100,6 +101,7 @@ def cmd_init(args) -> None:
         sys.exit(1)
     master_password = _prompt_new_password()
     vault.create(master_password)
+    audit.log_event(vault.path, "vault_created")
     print(f"Vault created at {vault.path}")
 
 
@@ -110,9 +112,11 @@ def cmd_unlock(args) -> None:
     try:
         vault.unlock(password)
     except InvalidPasswordError as exc:
+        audit.log_event(vault.path, "unlock_failed")
         _error(exc)
         sys.exit(1)
 
+    audit.log_event(vault.path, "unlock_succeeded")
     token = session_store.save_session(vault.path, password)
     print(f"export GUHIO_SESSION={token}")
     _info("Vault unlocked.")
@@ -122,6 +126,7 @@ def cmd_lock(args) -> None:
     """Lock the vault by clearing any active CLI session."""
     vault = Vault(args.vault)
     session_store.clear_session(vault.path)
+    audit.log_event(vault.path, "vault_locked")
     _info("Vault locked.")
 
 
@@ -148,6 +153,7 @@ def cmd_add(args) -> None:
     except VaultError as exc:
         _error(exc)
         sys.exit(1)
+    audit.log_event(vault.path, "credential_added", name=args.name)
     print(f"Credential '{args.name}' added.")
 
 
@@ -184,6 +190,7 @@ def cmd_remove(args) -> None:
     except EntryNotFoundError as exc:
         _error(exc)
         sys.exit(1)
+    audit.log_event(vault.path, "credential_removed", name=args.name)
     print(f"Credential '{args.name}' removed.")
 
 
@@ -202,10 +209,12 @@ def cmd_get(args) -> None:
         sys.exit(1)
 
     try:
-        print(vault.get(args.name))
+        value = vault.get(args.name)
     except EntryNotFoundError as exc:
         _error(exc)
         sys.exit(1)
+    audit.log_event(vault.path, "credential_revealed", name=args.name)
+    print(value)
 
 
 def _parse_mapping(mapping: str) -> tuple[str, str]:
@@ -217,6 +226,7 @@ def _parse_mapping(mapping: str) -> tuple[str, str]:
 
 
 _ENV_VAR_RE = re.compile(r"\$\{(\w+)\}|\$(\w+)")
+_ENV_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 def _expand_vars(text: str, env: dict[str, str]) -> str:
@@ -249,13 +259,19 @@ def cmd_exec(args) -> None:
         sys.exit(1)
 
     env = os.environ.copy()
+    used_names = []
     for mapping in args.with_:
         name, env_var = _parse_mapping(mapping)
+        if not _ENV_NAME_RE.match(env_var):
+            _error(f"Invalid environment variable name: '{env_var}'")
+            sys.exit(1)
         try:
             env[env_var] = vault.get(name)
         except EntryNotFoundError as exc:
             _error(exc)
             sys.exit(1)
+        used_names.append(name)
+    audit.log_event(vault.path, "credential_used", names=",".join(used_names))
 
     # Do not leak the master password or session token to the child process.
     env.pop("GUHIO_MASTER_PASSWORD", None)
@@ -447,7 +463,9 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> None:
     """Entry point for the CLI."""
-    warnings.filterwarnings("ignore")
+    # Suppress only the getpass echo warning for piped stdin; allow all other
+    # warnings (e.g. cryptography deprecations) to surface.
+    warnings.filterwarnings("ignore", message="Password input may be echoed")
     parser = build_parser()
     try:
         args = parser.parse_args()

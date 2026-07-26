@@ -1,4 +1,5 @@
 import json
+import os
 
 import pytest
 
@@ -127,3 +128,33 @@ def test_save_leaves_no_temp_file(tmp_path):
     vault.create("master-password")
     vault.add("github", "ghp_token")
     assert not (tmp_path / "vault.json.tmp").exists()
+
+
+def test_vault_directory_has_restrictive_permissions(tmp_path):
+    if os.name != "posix":
+        pytest.skip("file permissions are POSIX-only")
+
+    vault_path = tmp_path / "subdir" / "vault.json"
+    Vault(vault_path).create("master-password")
+    mode = vault_path.parent.stat().st_mode & 0o777
+    assert mode == 0o700
+
+
+def test_vault_write_rejects_symlink_temp_file(tmp_path):
+    """O_NOFOLLOW must prevent writing through a symlinked temp file."""
+    if os.name != "posix":
+        pytest.skip("symlink test is POSIX-only")
+
+    vault_path = tmp_path / "vault.json"
+    vault = Vault(vault_path)
+    vault.create("master-password")
+
+    target = tmp_path / "malicious-target"
+    target.write_text("important data")
+    temp_path = vault_path.with_suffix(vault_path.suffix + ".tmp")
+    os.symlink(target, temp_path)
+
+    with pytest.raises(OSError):
+        vault.add("test", "value")
+
+    assert target.read_text() == "important data"

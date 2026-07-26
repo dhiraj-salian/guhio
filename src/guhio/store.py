@@ -11,6 +11,18 @@ from typing import Any
 from guhio import crypto
 
 
+def _restrict_directory(path: Path) -> None:
+    """Ensure a directory is owner-only (mode 0700).
+
+    The vault directory must not be world- or group-accessible, otherwise
+    another local user could read file metadata or race the atomic write.
+    """
+    try:
+        os.chmod(path, 0o700)
+    except OSError:
+        pass
+
+
 class VaultError(Exception):
     """Base exception for vault operations."""
 
@@ -140,12 +152,19 @@ class Vault:
         Writing to a temporary file in the same directory and renaming it
         into place prevents a crash mid-write from corrupting or truncating
         the vault. The file is created with mode 0600 so only the owner can
-        read the encrypted contents.
+        read the encrypted contents. ``O_NOFOLLOW`` rejects a symlink placed
+        at the temp path, preventing a symlink-redirect attack on the write.
+        The vault directory is also restricted to 0700.
         """
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        _restrict_directory(self.path.parent)
         tmp_path = self.path.with_suffix(self.path.suffix + ".tmp")
         try:
-            fd = os.open(str(tmp_path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            fd = os.open(
+                str(tmp_path),
+                os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW,
+                0o600,
+            )
             with os.fdopen(fd, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2)
                 f.write("\n")
