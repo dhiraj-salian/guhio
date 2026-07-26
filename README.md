@@ -2,150 +2,108 @@
 
 [![PyPI version](https://img.shields.io/pypi/v/guhio.svg)](https://pypi.org/project/guhio/)
 
-Guhio (Sanskrit: गुह्य, "secret") is a local password vault built for agent
-workflows. It lets humans provide credentials without typing them into an agent
-context, and it lets agents *use* credentials by name without ever seeing the
-plaintext values.
+Guhio (Sanskrit: गुह्य, "secret") is a local password vault for agent workflows.
+Humans store credentials outside the agent context, and agents use them by name
+without ever seeing the plaintext values.
 
 ## Features
 
-- **Encrypted local vault** using PBKDF2-HMAC-SHA256 key derivation (600,000
-  iterations) and Fernet symmetric encryption (AES-128-CBC + HMAC).
-- **Atomic, permission-restricted storage** — the vault is written to a
-  temporary file and renamed into place, so a crash never leaves a truncated
-  vault, and the file is created with mode `0600` (owner read/write only).
-- **Human-friendly CLI** with secure `getpass` prompts (no echo).
-- **Agent-safe usage** via `guhio exec`, which injects credentials into a
-  subprocess as environment variables — the plaintext never appears in the
-  command string or in process `argv`.
-- **Local web dashboard** for adding, viewing, and managing credentials in a
-  browser, with XSS-safe rendering of credential names.
-- **Agent skill** following the [Agent Skills](https://agentskills.io/specification)
-  format so AI assistants can discover and use the vault safely.
+- Encrypted local vault using PBKDF2-HMAC-SHA256 (600,000 iterations) and
+  Fernet symmetric encryption (AES-128-CBC + HMAC).
+- Atomic, permission-restricted vault writes.
+- CLI with secure `getpass` prompts and a non-interactive `exec` mode that
+  injects credentials as environment variables.
+- Encrypted CLI sessions so you unlock once and run multiple commands.
+- Local web dashboard for managing credentials in a browser.
+- Agent skill under `.claude/skills/guhio/` following the
+  [Agent Skills specification](https://agentskills.io/specification).
 
 ## Installation
-
-Install the published package from PyPI:
 
 ```bash
 pip install guhio
 ```
 
-For development, install in editable mode with the test dependencies:
+## Quick start
 
 ```bash
-python3 -m venv .venv
-.venv/bin/pip install -e '.[dev]'
-```
+# Create a vault
+ guhio init
 
-## CLI Usage
+# Add a credential (value is prompted securely)
+ guhio add github
 
-The `guhio` command is installed as a console entry point. From a development
-checkout you can also run `python -m guhio.cli`.
+# Unlock once and reuse the session
+ eval $(guhio unlock)
 
-```bash
-# Create a vault (prompts twice for a new master password)
-guhio init
-
-# Add a credential (value is prompted securely unless --value is given)
-guhio add github
-
-# List credentials (names and creation times; never shows values)
-guhio list
-
-# Reveal a credential value (for humans/scripts; agents should prefer exec)
-guhio get github
-
-# Unlock the vault once to create a session, then run commands without re-prompting
-eval $(guhio unlock)
-guhio exec --with github:GITHUB_TOKEN -- env | grep GITHUB_TOKEN
+# Use the credential without exposing the value
+ guhio exec --with github:GITHUB_TOKEN --expand -- \
+   curl -H "Authorization: token $GITHUB_TOKEN" https://api.github.com/user
 
 # Lock the vault and clear the session
-guhio lock
-
-# Use a credential without revealing it — the value is injected as an env var.
-# exec runs the command directly (no shell), so shell variables like $GITHUB_TOKEN
-# are not expanded. Use --expand to expand $VAR placeholders in arguments, or
-# wrap the command in sh -c when you need full shell features:
-guhio exec --with github:GITHUB_TOKEN --expand -- curl \
-  -H "Authorization: token $GITHUB_TOKEN" https://api.github.com/user
-
-# Equivalent using a shell wrapper:
-guhio exec --with github:GITHUB_TOKEN -- sh -c \
-  'curl -H "Authorization: token $GITHUB_TOKEN" https://api.github.com/user'
-
-# Remove a credential
-guhio remove github
+ guhio lock
 ```
 
-The default vault file is `~/.guhio/vault.json`. Override it with `--vault <path>`
-or the `GUHIO_VAULT` environment variable.
+## Commands
 
-For automation and tests, the master password can be supplied via the
-`GUHIO_MASTER_PASSWORD` environment variable or the hidden `--password` flag.
-`guhio unlock` creates an encrypted session token in `~/.guhio/session.json` and
-prints `export GUHIO_SESSION=...`; subsequent commands use that token instead of
-prompting. Run `guhio lock` to clear the session. For normal interactive use,
-omit both and enter the password at the secure prompt.
+| Command | Purpose |
+|---------|---------|
+| `guhio init` | Create a new vault. |
+| `guhio add <name>` | Add a credential. Use `--value <value>` to skip prompting. |
+| `guhio list` | List credential names and creation times. |
+| `guhio get <name>` | Print a credential value. |
+| `guhio unlock` | Unlock the vault and print `export GUHIO_SESSION=...`. |
+| `guhio lock` | Clear the CLI session. |
+| `guhio exec --with <name>:<ENV_VAR> [--expand] -- <command>` | Run a command with the credential injected as an environment variable. |
+| `guhio remove <name>` | Delete a credential. |
+| `guhio dashboard` | Start the local web dashboard (default `http://127.0.0.1:5000`). |
+
+## Authentication
+
+The master password can be supplied in three ways, in order of precedence:
+
+1. `GUHIO_SESSION` environment variable from `guhio unlock`.
+2. `GUHIO_MASTER_PASSWORD` environment variable.
+3. The hidden `--password <pw>` flag.
+4. Interactive `getpass` prompt.
+
+Run `guhio lock` to remove the session file at `~/.guhio/session.json`.
+
+## Environment variables
+
+| Variable | Purpose |
+|----------|---------|
+| `GUHIO_VAULT` | Path to the vault file (default: `~/.guhio/vault.json`). |
+| `GUHIO_MASTER_PASSWORD` | Master password for non-interactive use. |
+| `GUHIO_SESSION` | Session token from `guhio unlock`. |
+| `GUHIO_HOST` / `GUHIO_PORT` | Dashboard bind address and port. |
 
 ## Dashboard
 
-Start the local web dashboard:
-
 ```bash
-# Default: http://127.0.0.1:5000
-guhio dashboard
-
-# Run on a different port
+guhio dashboard              # http://127.0.0.1:5000
 guhio dashboard --port 8080
-
-# Or configure host and port via environment variables
-GUHIO_PORT=8080 guhio dashboard
-GUHIO_HOST=0.0.0.0 GUHIO_PORT=8080 guhio dashboard   # bind to all interfaces
 ```
 
-The dashboard binds to `127.0.0.1:5000` by default. Override the host and port
-with the `--host` / `--port` flags or the `GUHIO_HOST` / `GUHIO_PORT`
-environment variables. The flag always wins over the environment variable. It
-requires the master password to unlock the vault.
+The dashboard stores unlocked vaults in server-side memory; sessions disappear
+when the server restarts. Do not expose the dashboard to untrusted networks.
 
-> Binding to `0.0.0.0` exposes the dashboard to your network. The dashboard is
-> intended for local, single-user management — do not expose it to untrusted
-> networks.
+## Security notes
 
-The dashboard keeps unlocked vaults in an in-memory, server-side session store
-(keyed by a random token in a signed cookie), so Flask's auto-reloader is
-disabled. Sessions disappear when the server process restarts; this is by
-design for local use.
+- The master password is the only protection for the vault file.
+- Vault files are written atomically with mode `0600`.
+- `guhio exec` runs commands directly (not through a shell). Use `--expand` to
+  substitute `$VAR` placeholders, or `sh -c '...'` for full shell features.
+- Never commit vault files to version control.
 
-## Agent Skill
+This is an MVP with reasonable cryptography; it has not undergone a formal
+security audit.
 
-A skill conforming to the [Agent Skills specification](https://agentskills.io/specification)
-is included under `.claude/skills/guhio/`. When loaded, it instructs agents to
-use `guhio exec` for credential-based operations and to direct humans to
-`guhio add` when a credential is missing, so secret values never enter the chat.
+## Development and contributing
 
-## Development
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for setup, testing, and contribution
+guidelines.
 
-```bash
-.venv/bin/python -m pytest
-```
+## License
 
-## Security Notes
-
-This is an MVP. It uses reasonable cryptography (PBKDF2-HMAC-SHA256 at 600,000
-iterations + Fernet/AES-128-CBC + HMAC) but has not undergone a formal security
-audit.
-
-- The master password is the only protection for the vault file. If an attacker
-  obtains both the vault file and the master password, all values are exposed.
-- The vault file is written atomically (temp file + `os.replace`) with mode
-  `0600`, so a crash mid-save cannot corrupt or truncate the store and other
-  users on the system cannot read the encrypted contents.
-- While the vault is unlocked, plaintext values reside only in the process
-  memory of the `guhio` command or the dashboard process. They are never
-  written to disk except in encrypted form.
-- The dashboard renders credential names with DOM APIs (`textContent` and
-  `addEventListener`) rather than `innerHTML`, preventing stored XSS through
-  crafted credential names.
-- Do not commit vault files to version control.
+MIT
