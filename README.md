@@ -1,5 +1,5 @@
 <h1>
-  <img src="assets/logo.svg" width="120" alt="Guhio logo" align="center">
+  <img src="https://raw.githubusercontent.com/dhiraj-salian/guhio/refs/heads/main/src/guhio/static/logo.svg" width="120" alt="Guhio logo" align="center">
   guhio
 </h1>
 
