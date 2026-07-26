@@ -6,6 +6,7 @@ from unittest.mock import patch
 
 import pytest
 
+from guhio import __version__
 from guhio.cli import build_parser, main
 
 
@@ -255,3 +256,40 @@ def test_dashboard_port_flag_overrides_env(monkeypatch):
     parser = build_parser()
     args = parser.parse_args(["dashboard", "--port", "9000"])
     assert args.port == 9000
+
+
+def test_version_flag_prints_version():
+    result = run_cli(["--version"])
+    assert result.returncode == 0
+    assert f"guhio {__version__}" in result.stdout
+
+
+def test_version_command_prints_version():
+    result = run_cli(["version"])
+    assert result.returncode == 0
+    assert f"guhio {__version__}" in result.stdout
+
+
+def test_keyboard_interrupt_is_handled_gracefully(monkeypatch, capsys):
+    monkeypatch.setattr("sys.argv", ["guhio", "--vault", "/tmp/guhio-test-vault.json", "init"])
+    monkeypatch.setattr("guhio.cli.cmd_init", lambda args: (_ for _ in ()).throw(KeyboardInterrupt()))
+    with pytest.raises(SystemExit) as exc_info:
+        main()
+    assert exc_info.value.code == 130
+    captured = capsys.readouterr()
+    assert "Traceback" not in captured.out + captured.err
+
+
+def test_errors_do_not_include_tracebacks(tmp_path):
+    vault_path = tmp_path / "vault.json"
+    run_cli(["--vault", str(vault_path), "init"], input_text="master\nmaster\n")
+    bad = run_cli(["--vault", str(vault_path), "--password", "wrong", "unlock"])
+    assert bad.returncode == 1
+    assert "Traceback" not in bad.stdout + bad.stderr
+
+
+def test_init_with_piped_input_does_not_warn_about_echo(tmp_path):
+    vault_path = tmp_path / "vault.json"
+    result = run_cli(["--vault", str(vault_path), "init"], input_text="pass\npass\n")
+    assert result.returncode == 0
+    assert "Warning: Password input may be echoed" not in result.stderr

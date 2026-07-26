@@ -1,5 +1,6 @@
 """Local web dashboard for managing the Guhio vault."""
 
+import logging
 import secrets
 
 from flask import Flask, abort, jsonify, render_template, request, session
@@ -110,6 +111,8 @@ def remove_credential(name: str) -> tuple[dict, int]:
 
 def run_dashboard(host: str = "127.0.0.1", port: int = 5000, debug: bool = False) -> None:
     """Start the Flask development server."""
+    # Hide Werkzeug's development-server warning while keeping real errors.
+    logging.getLogger("werkzeug").setLevel(logging.WARNING)
     # Do not use the reloader: it forks a child process and clears the
     # in-memory _vault_sessions dictionary, which would lock users out after
     # every auto-reload.

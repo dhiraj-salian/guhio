@@ -2,6 +2,8 @@
 
 [![PyPI version](https://img.shields.io/pypi/v/guhio.svg)](https://pypi.org/project/guhio/)
 
+<img src="assets/logo.svg" width="120" alt="Guhio logo">
+
 Guhio (Sanskrit: गुह्य, "secret") is a local password vault for agent workflows.
 Humans store credentials outside the agent context, and agents use them by name
 without ever seeing the plaintext values.
@@ -57,6 +59,7 @@ pip install guhio
 | `guhio exec --with <name>:<ENV_VAR> [--expand] -- <command>` | Run a command with the credential injected as an environment variable. |
 | `guhio remove <name>` | Delete a credential. |
 | `guhio dashboard` | Start the local web dashboard (default `http://127.0.0.1:5000`). |
+| `guhio --version` / `guhio version` | Show the installed Guhio version. |
 
 ## Authentication
 

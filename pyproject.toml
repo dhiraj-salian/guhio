@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "guhio"
-version = "0.1.0"
+version = "0.2.0"
 description = "A local password vault for agent workflows (guhio: Sanskrit for secret)"
 readme = "README.md"
 license = {text = "MIT"}
@@ -26,7 +26,7 @@ guhio = "guhio.cli:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-guhio = ["templates/*.html"]
+guhio = ["templates/*.html", "static/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

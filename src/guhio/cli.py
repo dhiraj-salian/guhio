@@ -6,8 +6,10 @@ import os
 import re
 import subprocess
 import sys
+import warnings
 from pathlib import Path
 
+from guhio import __version__
 from guhio import session as session_store
 from guhio.store import (
     EntryNotFoundError,
@@ -18,20 +20,53 @@ from guhio.store import (
 )
 
 
+def _supports_color(stream) -> bool:
+    """Return True if the stream supports ANSI color codes."""
+    return hasattr(stream, "isatty") and stream.isatty()
+
+
+def _style(text: str, color: str, bold: bool = False, stream=sys.stderr) -> str:
+    """Apply ANSI color/style to text when the stream supports it."""
+    if not _supports_color(stream):
+        return text
+    codes = [color]
+    if bold:
+        codes.append("1")
+    return f"\033[{';'.join(codes)}m{text}\033[0m"
+
+
+def _error(message: str) -> None:
+    """Print a user-facing error message to stderr."""
+    prefix = _style("error:", "31", bold=True)
+    print(f"{prefix} {message}", file=sys.stderr)
+
+
+def _info(message: str) -> None:
+    """Print an informational message to stderr."""
+    prefix = _style("info:", "34", bold=True)
+    print(f"{prefix} {message}", file=sys.stderr)
+
+
 def _prompt_password(prompt: str = "Master password: ") -> str:
-    """Prompt for a password without echoing to the terminal."""
-    return getpass.getpass(prompt)
+    """Prompt for a password without echoing on a TTY, or read from stdin."""
+    if sys.stdin.isatty():
+        return getpass.getpass(prompt)
+    return sys.stdin.readline().rstrip("\n")
 
 
 def _prompt_new_password() -> str:
     """Prompt for a new master password twice to avoid typos."""
-    first = getpass.getpass("Set master password: ")
-    second = getpass.getpass("Confirm master password: ")
+    if sys.stdin.isatty():
+        first = getpass.getpass("Set master password: ")
+        second = getpass.getpass("Confirm master password: ")
+    else:
+        first = sys.stdin.readline().rstrip("\n")
+        second = sys.stdin.readline().rstrip("\n")
     if first != second:
-        print("Passwords do not match.", file=sys.stderr)
+        _error("Passwords do not match.")
         sys.exit(1)
     if not first:
-        print("Master password cannot be empty.", file=sys.stderr)
+        _error("Master password cannot be empty.")
         sys.exit(1)
     return first
 
@@ -61,7 +96,7 @@ def cmd_init(args) -> None:
     """Create a new vault."""
     vault = Vault(args.vault)
     if vault.exists():
-        print(f"Vault already exists at {vault.path}", file=sys.stderr)
+        _error(f"Vault already exists at {vault.path}")
         sys.exit(1)
     master_password = _prompt_new_password()
     vault.create(master_password)
@@ -75,19 +110,19 @@ def cmd_unlock(args) -> None:
     try:
         vault.unlock(password)
     except InvalidPasswordError as exc:
-        print(f"Error: {exc}", file=sys.stderr)
+        _error(exc)
         sys.exit(1)
 
     token = session_store.save_session(vault.path, password)
     print(f"export GUHIO_SESSION={token}")
-    print("Vault unlocked.", file=sys.stderr)
+    _info("Vault unlocked.")
 
 
 def cmd_lock(args) -> None:
     """Lock the vault by clearing any active CLI session."""
     vault = Vault(args.vault)
     session_store.clear_session(vault.path)
-    print("Vault locked.")
+    _info("Vault locked.")
 
 
 def cmd_add(args) -> None:
@@ -97,21 +132,21 @@ def cmd_add(args) -> None:
     try:
         vault.unlock(password)
     except InvalidPasswordError as exc:
-        print(f"Error: {exc}", file=sys.stderr)
+        _error(exc)
         sys.exit(1)
 
     if args.value:
         value = args.value
     else:
-        value = getpass.getpass(f"Enter value for '{args.name}': ")
+        value = _prompt_password(f"Enter value for '{args.name}': ")
     if not value:
-        print("Credential value cannot be empty.", file=sys.stderr)
+        _error("Credential value cannot be empty.")
         sys.exit(1)
 
     try:
         vault.add(args.name, value)
     except VaultError as exc:
-        print(f"Error: {exc}", file=sys.stderr)
+        _error(exc)
         sys.exit(1)
     print(f"Credential '{args.name}' added.")
 
@@ -123,7 +158,7 @@ def cmd_list(args) -> None:
     try:
         vault.unlock(password)
     except InvalidPasswordError as exc:
-        print(f"Error: {exc}", file=sys.stderr)
+        _error(exc)
         sys.exit(1)
 
     entries = vault.list_entries()
@@ -141,13 +176,13 @@ def cmd_remove(args) -> None:
     try:
         vault.unlock(password)
     except InvalidPasswordError as exc:
-        print(f"Error: {exc}", file=sys.stderr)
+        _error(exc)
         sys.exit(1)
 
     try:
         vault.remove(args.name)
     except EntryNotFoundError as exc:
-        print(f"Error: {exc}", file=sys.stderr)
+        _error(exc)
         sys.exit(1)
     print(f"Credential '{args.name}' removed.")
 
@@ -163,13 +198,13 @@ def cmd_get(args) -> None:
     try:
         vault.unlock(password)
     except InvalidPasswordError as exc:
-        print(f"Error: {exc}", file=sys.stderr)
+        _error(exc)
         sys.exit(1)
 
     try:
         print(vault.get(args.name))
     except EntryNotFoundError as exc:
-        print(f"Error: {exc}", file=sys.stderr)
+        _error(exc)
         sys.exit(1)
 
 
@@ -198,8 +233,8 @@ def cmd_dashboard(args) -> None:
     """Start the local web dashboard."""
     from guhio.dashboard import run_dashboard
 
-    print(f"Starting Guhio dashboard at http://{args.host}:{args.port}")
-    print("Press Ctrl+C to stop.")
+    _info(f"Starting Guhio dashboard at http://{args.host}:{args.port}")
+    _info("Press Ctrl+C to stop.")
     run_dashboard(host=args.host, port=args.port, debug=args.debug)
 
 
@@ -210,7 +245,7 @@ def cmd_exec(args) -> None:
     try:
         vault.unlock(password)
     except InvalidPasswordError as exc:
-        print(f"Error: {exc}", file=sys.stderr)
+        _error(exc)
         sys.exit(1)
 
     env = os.environ.copy()
@@ -219,7 +254,7 @@ def cmd_exec(args) -> None:
         try:
             env[env_var] = vault.get(name)
         except EntryNotFoundError as exc:
-            print(f"Error: {exc}", file=sys.stderr)
+            _error(exc)
             sys.exit(1)
 
     # Do not leak the master password or session token to the child process.
@@ -230,7 +265,7 @@ def cmd_exec(args) -> None:
     if command and command[0] == "--":
         command = command[1:]
     if not command:
-        print("No command provided.", file=sys.stderr)
+        _error("No command provided.")
         sys.exit(1)
 
     if getattr(args, "expand", False):
@@ -241,9 +276,21 @@ def cmd_exec(args) -> None:
     try:
         result = subprocess.run(command, env=env, check=False)
     except FileNotFoundError as exc:
-        print(f"Error: command not found: {exc}", file=sys.stderr)
+        _error(f"command not found: {exc}")
         sys.exit(127)
     sys.exit(result.returncode)
+
+
+class _GuhioHelpFormatter(argparse.RawDescriptionHelpFormatter):
+    """Help formatter that preserves description line breaks and aligns options."""
+
+    def __init__(self, prog):
+        super().__init__(prog, max_help_position=35)
+
+
+def cmd_version(args) -> None:
+    """Print the Guhio version."""
+    print(f"guhio {__version__}")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -257,7 +304,21 @@ def build_parser() -> argparse.ArgumentParser:
 
     parser = argparse.ArgumentParser(
         prog="guhio",
-        description="Local password vault for agent workflows (guhio: Sanskrit for secret).",
+        description=(
+            "Local password vault for agent workflows.\n\n"
+            "Guhio (Sanskrit: गुह्य, \"secret\") keeps credentials encrypted on disk and lets "
+            "agents use them by name without exposing plaintext values in prompts or history."
+        ),
+        formatter_class=_GuhioHelpFormatter,
+        epilog=(
+            "Examples:\n"
+            "  guhio init\n"
+            "  guhio add github\n"
+            "  guhio unlock\n"
+            "  guhio exec --with github:GITHUB_TOKEN -- python script.py\n"
+            "  guhio lock\n\n"
+            "Run 'guhio <command> --help' for more information on a command."
+        ),
     )
     parser.add_argument(
         "--vault",
@@ -269,6 +330,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--password",
         default=None,
         help=argparse.SUPPRESS,
+    )
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"guhio {__version__}",
+        help="Show the Guhio version and exit",
     )
 
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -369,14 +436,33 @@ def build_parser() -> argparse.ArgumentParser:
     )
     dashboard_parser.set_defaults(func=cmd_dashboard)
 
+    version_parser = subparsers.add_parser(
+        "version",
+        help="Show the Guhio version and exit",
+    )
+    version_parser.set_defaults(func=cmd_version)
+
     return parser
 
 
 def main() -> None:
     """Entry point for the CLI."""
+    warnings.filterwarnings("ignore")
     parser = build_parser()
-    args = parser.parse_args()
-    args.func(args)
+    try:
+        args = parser.parse_args()
+        args.func(args)
+    except KeyboardInterrupt:
+        print(file=sys.stderr)
+        sys.exit(130)
+    except SystemExit:
+        raise
+    except VaultError as exc:
+        _error(exc)
+        sys.exit(1)
+    except Exception as exc:
+        _error(f"an unexpected error occurred: {exc}")
+        sys.exit(1)
 
 
 if __name__ == "__main__":
