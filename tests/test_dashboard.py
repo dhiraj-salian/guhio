@@ -2,6 +2,7 @@ import pytest
 
 from guhio.dashboard import _vault_sessions, app
 from guhio.store import Vault
+from urllib.parse import quote
 
 
 @pytest.fixture
@@ -84,3 +85,30 @@ def test_lock_clears_session(client):
     client.post("/api/lock")
     assert client.get("/api/status").get_json()["unlocked"] is False
     assert client.get("/api/credentials").status_code == 401
+
+
+def test_index_has_no_inline_remove_handler(client):
+    """Regression guard: credential removal must not use inline onclick or
+    innerHTML with user-controlled names (stored XSS)."""
+    response = client.get("/")
+    assert response.status_code == 200
+    assert b"escapeHtml" not in response.data
+    assert b"onclick=\"removeCredential(" not in response.data
+
+
+def test_special_character_credential_name_round_trip(client):
+    client.post("/api/unlock", json={"password": "master-password"})
+    special = "a');alert(1);//"
+    add = client.post("/api/credentials", json={"name": special, "value": "v"})
+    assert add.status_code == 200
+
+    lst = client.get("/api/credentials")
+    names = [entry["name"] for entry in lst.get_json()]
+    assert special in names
+
+    rm = client.delete(f"/api/credentials/{quote(special, safe='')}")
+    assert rm.status_code == 200
+
+    lst = client.get("/api/credentials")
+    names = [entry["name"] for entry in lst.get_json()]
+    assert special not in names

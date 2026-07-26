@@ -78,16 +78,13 @@ class Vault:
 
         salt = crypto.generate_salt()
         verify = crypto.encrypt_value(master_password, "guhio-v1", salt=salt)
-        self.path.parent.mkdir(parents=True, exist_ok=True)
         data = {
             "version": 1,
             "salt": base64.urlsafe_b64encode(salt).decode("ascii"),
             "verify": base64.urlsafe_b64encode(verify).decode("ascii"),
             "entries": {},
         }
-        with open(self.path, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2)
-            f.write("\n")
+        self._write_vault(data)
 
         self._salt = salt
         self._entries = {}
@@ -137,6 +134,28 @@ class Vault:
         if not self.is_unlocked():
             raise VaultError("Vault is locked. Run 'guhio unlock' or provide a password.")
 
+    def _write_vault(self, data: dict[str, Any]) -> None:
+        """Persist ``data`` to disk atomically with restrictive permissions.
+
+        Writing to a temporary file in the same directory and renaming it
+        into place prevents a crash mid-write from corrupting or truncating
+        the vault. The file is created with mode 0600 so only the owner can
+        read the encrypted contents.
+        """
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        tmp_path = self.path.with_suffix(self.path.suffix + ".tmp")
+        try:
+            fd = os.open(str(tmp_path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2)
+                f.write("\n")
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_path, self.path)
+        except Exception:
+            tmp_path.unlink(missing_ok=True)
+            raise
+
     def _save(self) -> None:
         """Persist the current state to disk."""
         self.ensure_unlocked()
@@ -159,10 +178,7 @@ class Vault:
             "verify": self._metadata.get("verify", ""),
             "entries": entries,
         }
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        with open(self.path, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2)
-            f.write("\n")
+        self._write_vault(data)
         self._metadata = data
 
     def add(self, name: str, value: str) -> None:

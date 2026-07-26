@@ -279,14 +279,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     dashboard_parser.add_argument(
         "--host",
-        default="127.0.0.1",
-        help="Host to bind the dashboard to (default: 127.0.0.1)",
+        default=os.environ.get("GUHIO_HOST", "127.0.0.1"),
+        help="Host to bind the dashboard to (default: 127.0.0.1; can also be set via GUHIO_HOST env var)",
     )
     dashboard_parser.add_argument(
         "--port",
         type=int,
-        default=5000,
-        help="Port to bind the dashboard to (default: 5000)",
+        default=int(os.environ.get("GUHIO_PORT", "5000")),
+        help="Port to bind the dashboard to (default: 5000; can also be set via GUHIO_PORT env var)",
     )
     dashboard_parser.add_argument(
         "--debug",

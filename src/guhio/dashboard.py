@@ -97,7 +97,7 @@ def add_credential() -> tuple[dict, int]:
     return jsonify({"ok": True})
 
 
-@app.route("/api/credentials/<name>", methods=["DELETE"])
+@app.route("/api/credentials/<path:name>", methods=["DELETE"])
 def remove_credential(name: str) -> tuple[dict, int]:
     """Remove a credential from the vault."""
     vault = _require_vault()

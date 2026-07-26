@@ -26,11 +26,8 @@ def _find_guhio_command() -> list[str]:
 
 
 def main() -> int:
-    env = os.environ.copy()
-    env["GUHIO_QUIET"] = "1"
-
     cmd = _find_guhio_command() + ["list"]
-    result = subprocess.run(cmd, capture_output=True, text=True, env=env)
+    result = subprocess.run(cmd, capture_output=True, text=True, env=os.environ.copy())
     if result.returncode != 0:
         sys.stderr.write(result.stderr)
         return result.returncode

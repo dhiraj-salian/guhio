@@ -91,3 +91,24 @@ def test_parser_rejects_unknown_command():
     parser = build_parser()
     with pytest.raises(SystemExit):
         parser.parse_args(["unknown"])
+
+
+def test_dashboard_port_from_env(monkeypatch):
+    monkeypatch.setenv("GUHIO_PORT", "8080")
+    parser = build_parser()
+    args = parser.parse_args(["dashboard"])
+    assert args.port == 8080
+
+
+def test_dashboard_host_from_env(monkeypatch):
+    monkeypatch.setenv("GUHIO_HOST", "0.0.0.0")
+    parser = build_parser()
+    args = parser.parse_args(["dashboard"])
+    assert args.host == "0.0.0.0"
+
+
+def test_dashboard_port_flag_overrides_env(monkeypatch):
+    monkeypatch.setenv("GUHIO_PORT", "8080")
+    parser = build_parser()
+    args = parser.parse_args(["dashboard", "--port", "9000"])
+    assert args.port == 9000

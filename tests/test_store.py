@@ -93,3 +93,37 @@ def test_vault_persists_after_reopen(tmp_path):
     assert data["version"] == 1
     assert "salt" in data
     assert "github" in data["entries"]
+
+
+def test_vault_file_has_restrictive_permissions(tmp_path):
+    import os
+
+    if os.name != "posix":
+        pytest.skip("file permissions are POSIX-only")
+
+    vault_path = tmp_path / "vault.json"
+    Vault(vault_path).create("master-password")
+    mode = vault_path.stat().st_mode & 0o777
+    assert mode == 0o600
+
+
+def test_save_preserves_restrictive_permissions(tmp_path):
+    import os
+
+    if os.name != "posix":
+        pytest.skip("file permissions are POSIX-only")
+
+    vault_path = tmp_path / "vault.json"
+    vault = Vault(vault_path)
+    vault.create("master-password")
+    vault.add("github", "ghp_token")
+    mode = vault_path.stat().st_mode & 0o777
+    assert mode == 0o600
+
+
+def test_save_leaves_no_temp_file(tmp_path):
+    vault_path = tmp_path / "vault.json"
+    vault = Vault(vault_path)
+    vault.create("master-password")
+    vault.add("github", "ghp_token")
+    assert not (tmp_path / "vault.json.tmp").exists()

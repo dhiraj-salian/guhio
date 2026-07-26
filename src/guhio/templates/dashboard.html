@@ -172,11 +172,23 @@
                     document.getElementById('empty-state').style.display = 'none';
                     for (const cred of credentials) {
                         const tr = document.createElement('tr');
-                        tr.innerHTML = `
-                            <td>${escapeHtml(cred.name)}</td>
-                            <td>${new Date(cred.created_at).toLocaleString()}</td>
-                            <td><button class="danger" onclick="removeCredential('${escapeHtml(cred.name)}')">Remove</button></td>
-                        `;
+
+                        const tdName = document.createElement('td');
+                        tdName.textContent = cred.name;
+                        tr.appendChild(tdName);
+
+                        const tdCreated = document.createElement('td');
+                        tdCreated.textContent = new Date(cred.created_at).toLocaleString();
+                        tr.appendChild(tdCreated);
+
+                        const tdAction = document.createElement('td');
+                        const btn = document.createElement('button');
+                        btn.className = 'danger';
+                        btn.textContent = 'Remove';
+                        btn.addEventListener('click', () => removeCredential(cred.name));
+                        tdAction.appendChild(btn);
+                        tr.appendChild(tdAction);
+
                         tbody.appendChild(tr);
                     }
                 }
@@ -212,12 +224,6 @@
             } catch (err) {
                 showMessage(err.message, true);
             }
-        }
-
-        function escapeHtml(text) {
-            const div = document.createElement('div');
-            div.textContent = text;
-            return div.innerHTML;
         }
 
         refreshStatus();
