@@ -202,11 +202,21 @@ def unlock() -> tuple[dict, int]:
 
 @app.route("/api/lock", methods=["POST"])
 def lock() -> dict:
-    """Lock the vault and clear the server-side session."""
+    """Lock the vault and clear the server-side session.
+
+    Also clears the CLI session file so that ``GUHIO_SESSION`` in the
+    environment cannot immediately re-unlock the vault. Without this,
+    locking from the dashboard would appear to do nothing when the
+    dashboard was auto-unlocked from a CLI session.
+    """
     _check_origin()
     token = session.pop("vault_token", None)
     if token:
         _vault_sessions.pop(token, None)
+    # Clear the CLI session file so the env-var auto-unlock cannot
+    # re-unlock immediately after the user explicitly locked.
+    vault = Vault()
+    session_store.clear_session(vault.path)
     logger.info("vault locked for %s", _client_ip())
     return jsonify({"unlocked": False})
 

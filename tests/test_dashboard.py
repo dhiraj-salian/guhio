@@ -219,3 +219,25 @@ def test_no_auto_unlock_without_cli_session(client, monkeypatch):
     monkeypatch.delenv("GUHIO_SESSION", raising=False)
     response = client.get("/api/status")
     assert response.get_json()["unlocked"] is False
+
+
+def test_lock_clears_cli_session_so_no_reunlock(client, monkeypatch):
+    """Locking from the dashboard must clear the CLI session file so the
+    GUHIO_SESSION env var cannot immediately re-unlock the vault."""
+    vault = Vault()
+    token = session_store.save_session(vault.path, "master-password")
+    monkeypatch.setenv("GUHIO_SESSION", token)
+
+    # Auto-unlocks from CLI session
+    assert client.get("/api/status").get_json()["unlocked"] is True
+
+    # Lock from dashboard
+    client.post("/api/lock", headers={"Origin": "http://localhost"})
+
+    # Must NOT re-auto-unlock from the (now deleted) CLI session
+    assert client.get("/api/status").get_json()["unlocked"] is False
+    assert client.get("/api/credentials").status_code == 401
+
+    # The CLI session file must be gone
+    session_path = vault.path.parent / "session.json"
+    assert not session_path.exists()
